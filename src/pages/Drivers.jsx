@@ -1,6 +1,15 @@
 import { useState, useEffect } from 'react';
 import { adminAPI } from '../api/admin';
+import { API_BASE_URL } from '../config';
 import './Users.css';
+
+/** Build absolute URL for /uploads/... paths stored in DB */
+function mediaUrl(path) {
+  if (!path) return '';
+  if (/^https?:\/\//i.test(path) || path.startsWith('data:')) return path;
+  const origin = API_BASE_URL.replace(/\/api\/?$/, '');
+  return path.startsWith('/') ? `${origin}${path}` : `${origin}/${path}`;
+}
 
 function Drivers() {
   const [drivers, setDrivers] = useState([]);
@@ -192,7 +201,7 @@ function Drivers() {
                 <p style={{fontWeight: 600, marginBottom: '8px', color: '#555'}}>Driving License</p>
                 {selectedDriver.license_document ? (
                   <img
-                    src={selectedDriver.license_document}
+                    src={mediaUrl(selectedDriver.license_document)}
                     alt="License"
                     style={{width: '100%', height: '160px', objectFit: 'cover', borderRadius: '8px', border: '1px solid #E0E0E0'}}
                   />
@@ -208,7 +217,7 @@ function Drivers() {
                 <p style={{fontWeight: 600, marginBottom: '8px', color: '#555'}}>Aadhar Card</p>
                 {selectedDriver.aadhar_document ? (
                   <img
-                    src={selectedDriver.aadhar_document}
+                    src={mediaUrl(selectedDriver.aadhar_document)}
                     alt="Aadhar"
                     style={{width: '100%', height: '160px', objectFit: 'cover', borderRadius: '8px', border: '1px solid #E0E0E0'}}
                   />

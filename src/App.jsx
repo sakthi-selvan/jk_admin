@@ -8,6 +8,7 @@ import Rides from './pages/Rides';
 import DriverEarnings from './pages/DriverEarnings';
 import ActiveRides from './pages/ActiveRides';
 import DriverLocations from './pages/DriverLocations';
+import Pricing from './pages/Pricing';
 import Layout from './components/Layout';
 import './App.css';
 
@@ -62,6 +63,7 @@ function App() {
                   <Route path="/earnings" element={<DriverEarnings />} />
                   <Route path="/active-rides" element={<ActiveRides />} />
                   <Route path="/driver-locations" element={<DriverLocations />} />
+                  <Route path="/pricing" element={<Pricing />} />
                 </Routes>
               </Layout>
             ) : (

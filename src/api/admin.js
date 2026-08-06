@@ -77,4 +77,17 @@ export const adminAPI = {
     const response = await apiClient.get('/admin/drivers/online');
     return response.data;
   },
+
+  // Vehicle pricing (admin-enhanced — note doubled /admin path)
+  getVehicleCategories: async (includeInactive = true) => {
+    const response = await apiClient.get('/v2/admin/admin/vehicle-categories', {
+      params: { include_inactive: includeInactive },
+    });
+    return response.data;
+  },
+
+  updateVehicleCategory: async (categoryId, data) => {
+    const response = await apiClient.put(`/v2/admin/admin/vehicle-categories/${categoryId}`, data);
+    return response.data;
+  },
 };
