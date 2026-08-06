@@ -1,173 +1,320 @@
-import { useState, useEffect } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import { Link } from 'react-router-dom';
+import {
+  Area,
+  AreaChart,
+  Bar,
+  BarChart,
+  CartesianGrid,
+  Cell,
+  Pie,
+  PieChart,
+  ResponsiveContainer,
+  Tooltip,
+  XAxis,
+  YAxis,
+} from 'recharts';
 import { adminAPI } from '../api/admin';
-import './Dashboard.css';
+import {
+  ChartCard,
+  EmptyState,
+  formatDate,
+  formatINR,
+  PageHeader,
+  PeriodSelect,
+  StatCard,
+  StatusBadge,
+} from '../components/ui';
+
+const STATUS_COLORS = {
+  pending: '#F59E0B',
+  accepted: '#3B82F6',
+  started: '#8B5CF6',
+  completed: '#22C55E',
+  cancelled: '#EF4444',
+};
+
+const CHART_COLORS = ['#8B5CF6', '#22C55E', '#3B82F6', '#F59E0B', '#EC4899', '#14B8A6'];
 
 function Dashboard() {
-  const [stats, setStats] = useState(null);
+  const [days, setDays] = useState(7);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+  const [lastUpdated, setLastUpdated] = useState(null);
+  const [legacy, setLegacy] = useState(null);
+  const [overview, setOverview] = useState(null);
+  const [hourly, setHourly] = useState([]);
+  const [tripTypes, setTripTypes] = useState([]);
+  const [vehicles, setVehicles] = useState([]);
+  const [daily, setDaily] = useState([]);
+  const [recent, setRecent] = useState([]);
 
-  useEffect(() => {
-    loadStats();
-  }, []);
-
-  const loadStats = async () => {
+  const load = useCallback(async () => {
     try {
-      setLoading(true);
-      const data = await adminAPI.getStats();
-      setStats(data);
       setError('');
+      const [stats, ov, hour, trips, cats, forecast, recentRes] = await Promise.all([
+        adminAPI.getStats().catch(() => null),
+        adminAPI.getAnalyticsOverview(days),
+        adminAPI.getHourlyDistribution(days),
+        adminAPI.getTripTypeAnalytics(days),
+        adminAPI.getVehicleCategoryAnalytics(days),
+        adminAPI.getRevenueForecast().catch(() => ({ daily_data: [] })),
+        adminAPI.getRecentRides({ limit: 8 }),
+      ]);
+      setLegacy(stats);
+      setOverview(ov);
+      const hourlyRows = Array.from({ length: 24 }, (_, h) => {
+        const hit = (hour?.hourly_distribution || []).find((row) => Number(row.hour) === h);
+        return {
+          hour: `${String(h).padStart(2, '0')}:00`,
+          rides: hit?.ride_count || 0,
+          revenue: hit?.total_revenue || 0,
+        };
+      });
+      setHourly(hourlyRows);
+      setTripTypes(
+        (trips?.trip_types || []).map((t) => ({
+          name: t.trip_type || 'unknown',
+          rides: t.ride_count,
+          revenue: t.total_revenue,
+        }))
+      );
+      setVehicles(
+        (cats?.vehicle_categories || []).map((t) => ({
+          name: t.vehicle_category || 'unknown',
+          rides: t.ride_count,
+          revenue: t.total_revenue,
+        }))
+      );
+      setDaily(
+        (forecast?.daily_data || []).map((d) => ({
+          date: String(d.date).slice(5),
+          revenue: d.revenue,
+          rides: d.ride_count,
+        }))
+      );
+      setRecent(recentRes?.rides || []);
+      setLastUpdated(new Date());
     } catch (err) {
-      setError('Failed to load statistics');
+      setError(err?.response?.data?.detail || 'Failed to load dashboard analytics');
     } finally {
       setLoading(false);
     }
-  };
+  }, [days]);
 
-  if (loading) {
+  useEffect(() => {
+    setLoading(true);
+    load();
+    const id = setInterval(load, 60000);
+    return () => clearInterval(id);
+  }, [load]);
+
+  const statusData = useMemo(() => {
+    const map = overview?.rides_by_status || {};
+    return Object.entries(map).map(([name, value]) => ({ name, value }));
+  }, [overview]);
+
+  if (loading && !overview) {
     return (
       <div className="page-container">
-        <div className="loading">Loading statistics...</div>
-      </div>
-    );
-  }
-
-  if (error) {
-    return (
-      <div className="page-container">
-        <div className="error-box">{error}</div>
+        <div className="loading">Loading insights…</div>
       </div>
     );
   }
 
   return (
     <div className="page-container">
-      <div className="page-header">
-        <h1>Dashboard</h1>
-        <p>Overview of your taxi platform</p>
+      <PageHeader
+        title="Dashboard"
+        subtitle="Live platform insights from completed bookings"
+        actions={
+          <>
+            <PeriodSelect value={days} onChange={setDays} />
+            <button type="button" className="ui-btn ui-btn-primary" onClick={load}>
+              Refresh
+            </button>
+          </>
+        }
+      />
+
+      {lastUpdated && (
+        <p style={{ color: 'var(--text-muted)', fontSize: 12, marginTop: -12, marginBottom: 16 }}>
+          Updated {lastUpdated.toLocaleTimeString('en-IN')} · auto-refresh every 60s
+        </p>
+      )}
+
+      {error && (
+        <div className="error-box">
+          {error}{' '}
+          <button type="button" className="ui-btn" onClick={load} style={{ marginLeft: 8 }}>
+            Retry
+          </button>
+        </div>
+      )}
+
+      <div className="ui-stat-grid">
+        <StatCard label="Users" value={legacy?.total_users ?? '—'} hint="All-time accounts" />
+        <StatCard label="Drivers" value={legacy?.total_drivers ?? '—'} hint="Registered captains" />
+        <StatCard label="Rides" value={overview?.total_rides ?? 0} hint={`Last ${days} days`} />
+        <StatCard label="Revenue" value={formatINR(overview?.total_revenue)} color="#22C55E" hint={`Last ${days} days`} />
+        <StatCard label="Completion" value={`${overview?.completion_rate ?? 0}%`} color="#8B5CF6" />
+        <StatCard label="Avg fare" value={formatINR(overview?.average_fare)} color="#F59E0B" />
+        <StatCard label="Active" value={overview?.active_rides ?? 0} color="#3B82F6" />
+        <StatCard label="Cancelled" value={overview?.cancelled_rides ?? 0} color="#EF4444" />
       </div>
 
-      <div className="stats-grid">
-        <div className="stat-card">
-          <div className="stat-icon" style={{ background: 'rgba(59, 130, 246, 0.1)' }}>
-            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#3B82F6" strokeWidth="2">
-              <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/>
-              <circle cx="9" cy="7" r="4"/>
-              <path d="M23 21v-2a4 4 0 0 0-3-3.87"/>
-              <path d="M16 3.13a4 4 0 0 1 0 7.75"/>
-            </svg>
-          </div>
-          <div className="stat-content">
-            <div className="stat-value">{stats?.total_users || 0}</div>
-            <div className="stat-label">Total Users</div>
-          </div>
-        </div>
+      <div className="ui-chart-grid">
+        <ChartCard title="Revenue & rides (last 30 days)">
+          {daily.length === 0 ? (
+            <EmptyState message="No completed rides in the last 30 days" />
+          ) : (
+            <ResponsiveContainer width="100%" height={240}>
+              <AreaChart data={daily}>
+                <defs>
+                  <linearGradient id="revFill" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="0%" stopColor="#8B5CF6" stopOpacity={0.35} />
+                    <stop offset="100%" stopColor="#8B5CF6" stopOpacity={0} />
+                  </linearGradient>
+                </defs>
+                <CartesianGrid stroke="#334155" strokeDasharray="3 3" />
+                <XAxis dataKey="date" stroke="#64748B" fontSize={11} />
+                <YAxis stroke="#64748B" fontSize={11} />
+                <Tooltip
+                  contentStyle={{ background: '#1E293B', border: '1px solid #334155', borderRadius: 8 }}
+                />
+                <Area type="monotone" dataKey="revenue" stroke="#8B5CF6" fill="url(#revFill)" name="Revenue" />
+                <Area type="monotone" dataKey="rides" stroke="#22C55E" fill="transparent" name="Rides" />
+              </AreaChart>
+            </ResponsiveContainer>
+          )}
+        </ChartCard>
 
-        <div className="stat-card">
-          <div className="stat-icon" style={{ background: 'rgba(139, 92, 246, 0.1)' }}>
-            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#8B5CF6" strokeWidth="2">
-              <path d="M18.92 6.01C18.72 5.42 18.16 5 17.5 5h-11c-.66 0-1.21.42-1.42 1.01L3 12v8c0 .55.45 1 1 1h1c.55 0 1-.45 1-1v-1h12v1c0 .55.45 1 1 1h1c.55 0 1-.45 1-1v-8l-2.08-5.99zM6.5 16c-.83 0-1.5-.67-1.5-1.5S5.67 13 6.5 13s1.5.67 1.5 1.5S7.33 16 6.5 16zm11 0c-.83 0-1.5-.67-1.5-1.5s.67-1.5 1.5-1.5 1.5.67 1.5 1.5-.67 1.5-1.5 1.5zM5 11l1.5-4.5h11L19 11H5z"/>
-            </svg>
+        <ChartCard title="Rides by status">
+          {statusData.length === 0 ? (
+            <EmptyState message="No ride status data" />
+          ) : (
+            <ResponsiveContainer width="100%" height={240}>
+              <PieChart>
+                <Pie data={statusData} dataKey="value" nameKey="name" innerRadius={55} outerRadius={90} paddingAngle={2}>
+                  {statusData.map((entry) => (
+                    <Cell key={entry.name} fill={STATUS_COLORS[entry.name] || '#64748B'} />
+                  ))}
+                </Pie>
+                <Tooltip
+                  contentStyle={{ background: '#1E293B', border: '1px solid #334155', borderRadius: 8 }}
+                />
+              </PieChart>
+            </ResponsiveContainer>
+          )}
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginTop: 8 }}>
+            {statusData.map((s) => (
+              <span key={s.name} className={`ui-badge ${s.name}`}>
+                {s.name}: {s.value}
+              </span>
+            ))}
           </div>
-          <div className="stat-content">
-            <div className="stat-value">{stats?.total_drivers || 0}</div>
-            <div className="stat-label">Total Drivers</div>
-          </div>
-        </div>
+        </ChartCard>
 
-        <div className="stat-card">
-          <div className="stat-icon" style={{ background: 'rgba(16, 185, 129, 0.1)' }}>
-            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#10B981" strokeWidth="2">
-              <circle cx="12" cy="12" r="10"/>
-              <polyline points="12 6 12 12 16 14"/>
-            </svg>
-          </div>
-          <div className="stat-content">
-            <div className="stat-value">{stats?.total_rides || 0}</div>
-            <div className="stat-label">Total Rides</div>
-          </div>
-        </div>
+        <ChartCard title={`Hourly demand (${days}d)`}>
+          <ResponsiveContainer width="100%" height={240}>
+            <BarChart data={hourly}>
+              <CartesianGrid stroke="#334155" strokeDasharray="3 3" />
+              <XAxis dataKey="hour" stroke="#64748B" fontSize={10} interval={3} />
+              <YAxis stroke="#64748B" fontSize={11} />
+              <Tooltip
+                contentStyle={{ background: '#1E293B', border: '1px solid #334155', borderRadius: 8 }}
+              />
+              <Bar dataKey="rides" fill="#3B82F6" radius={[4, 4, 0, 0]} />
+            </BarChart>
+          </ResponsiveContainer>
+        </ChartCard>
 
-        <div className="stat-card">
-          <div className="stat-icon" style={{ background: 'rgba(245, 158, 11, 0.1)' }}>
-            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#F59E0B" strokeWidth="2">
-              <line x1="12" y1="1" x2="12" y2="23"/>
-              <path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/>
-            </svg>
-          </div>
-          <div className="stat-content">
-            <div className="stat-value">₹{stats?.total_revenue?.toFixed(2) || '0.00'}</div>
-            <div className="stat-label">Total Revenue</div>
-          </div>
-        </div>
-
-        <div className="stat-card">
-          <div className="stat-icon" style={{ background: 'rgba(34, 197, 94, 0.1)' }}>
-            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#22C55E" strokeWidth="2">
-              <polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/>
-            </svg>
-          </div>
-          <div className="stat-content">
-            <div className="stat-value">{stats?.active_rides || 0}</div>
-            <div className="stat-label">Active Rides</div>
-          </div>
-        </div>
-
-        <div className="stat-card">
-          <div className="stat-icon" style={{ background: 'rgba(99, 102, 241, 0.1)' }}>
-            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#6366F1" strokeWidth="2">
-              <polyline points="20 6 9 17 4 12"/>
-            </svg>
-          </div>
-          <div className="stat-content">
-            <div className="stat-value">{stats?.completed_rides || 0}</div>
-            <div className="stat-label">Completed Rides</div>
-          </div>
-        </div>
+        <ChartCard title="Vehicle mix (completed)">
+          {vehicles.length === 0 ? (
+            <EmptyState message="No vehicle category data" />
+          ) : (
+            <ResponsiveContainer width="100%" height={240}>
+              <BarChart data={vehicles} layout="vertical" margin={{ left: 24 }}>
+                <CartesianGrid stroke="#334155" strokeDasharray="3 3" />
+                <XAxis type="number" stroke="#64748B" fontSize={11} />
+                <YAxis type="category" dataKey="name" stroke="#64748B" fontSize={11} width={70} />
+                <Tooltip
+                  contentStyle={{ background: '#1E293B', border: '1px solid #334155', borderRadius: 8 }}
+                />
+                <Bar dataKey="rides" radius={[0, 4, 4, 0]}>
+                  {vehicles.map((_, i) => (
+                    <Cell key={i} fill={CHART_COLORS[i % CHART_COLORS.length]} />
+                  ))}
+                </Bar>
+              </BarChart>
+            </ResponsiveContainer>
+          )}
+        </ChartCard>
       </div>
 
-      <div className="info-section">
-        <h2>Quick Actions</h2>
-        <div className="action-grid">
-          <a href="/users" className="action-card">
-            <div className="action-icon">
-              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/>
-                <circle cx="9" cy="7" r="4"/>
-                <path d="M23 21v-2a4 4 0 0 0-3-3.87"/>
-                <path d="M16 3.13a4 4 0 0 1 0 7.75"/>
-              </svg>
-            </div>
-            <div>
-              <h3>Manage Users</h3>
-              <p>View and manage customer accounts</p>
-            </div>
-          </a>
+      {tripTypes.length > 0 && (
+        <div style={{ marginBottom: 24 }}>
+          <ChartCard title="Trip type mix">
+            <ResponsiveContainer width="100%" height={200}>
+              <BarChart data={tripTypes}>
+                <CartesianGrid stroke="#334155" strokeDasharray="3 3" />
+                <XAxis dataKey="name" stroke="#64748B" fontSize={11} />
+                <YAxis stroke="#64748B" fontSize={11} />
+                <Tooltip
+                  contentStyle={{ background: '#1E293B', border: '1px solid #334155', borderRadius: 8 }}
+                />
+                <Bar dataKey="rides" fill="#14B8A6" radius={[4, 4, 0, 0]} name="Rides" />
+                <Bar dataKey="revenue" fill="#8B5CF6" radius={[4, 4, 0, 0]} name="Revenue" />
+              </BarChart>
+            </ResponsiveContainer>
+          </ChartCard>
+        </div>
+      )}
 
-          <a href="/drivers" className="action-card">
-            <div className="action-icon">
-              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                <path d="M18.92 6.01C18.72 5.42 18.16 5 17.5 5h-11c-.66 0-1.21.42-1.42 1.01L3 12v8c0 .55.45 1 1 1h1c.55 0 1-.45 1-1v-1h12v1c0 .55.45 1 1 1h1c.55 0 1-.45 1-1v-8l-2.08-5.99z"/>
-              </svg>
-            </div>
-            <div>
-              <h3>Manage Drivers</h3>
-              <p>View and manage driver accounts</p>
-            </div>
-          </a>
+      <div className="ops-layout" style={{ marginBottom: 24 }}>
+        <div className="dash-side">
+          <h3>Recent rides</h3>
+          {recent.length === 0 ? (
+            <EmptyState message="No recent rides" />
+          ) : (
+            recent.map((ride) => (
+              <div key={ride.id} className="recent-row">
+                <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8 }}>
+                  <strong style={{ fontSize: 13 }}>{ride.vehicle_category || 'Ride'}</strong>
+                  <StatusBadge status={ride.status} />
+                </div>
+                <div style={{ fontSize: 12, color: 'var(--text-secondary)', marginTop: 4 }}>
+                  {(ride.pickup_location || 'Pickup').slice(0, 42)}
+                  {ride.dropoff_location ? ` → ${(ride.dropoff_location || '').slice(0, 28)}` : ''}
+                </div>
+                <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 4 }}>
+                  {formatINR(ride.fare)} · {formatDate(ride.created_at)}
+                </div>
+              </div>
+            ))
+          )}
+        </div>
 
-          <a href="/rides" className="action-card">
-            <div className="action-icon">
-              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                <circle cx="12" cy="12" r="10"/>
-                <polyline points="12 6 12 12 16 14"/>
-              </svg>
-            </div>
-            <div>
-              <h3>View Rides</h3>
-              <p>Monitor all ride activities</p>
-            </div>
-          </a>
+        <div>
+          <h3 style={{ marginBottom: 12, fontSize: 14 }}>Quick actions</h3>
+          <div className="quick-links">
+            <Link className="quick-link" to="/active-rides">
+              <h4>Active rides</h4>
+              <p>Live map of trips in progress</p>
+            </Link>
+            <Link className="quick-link" to="/drivers">
+              <h4>Driver KYC</h4>
+              <p>Approve pending captain documents</p>
+            </Link>
+            <Link className="quick-link" to="/pricing">
+              <h4>Pricing</h4>
+              <p>Update fares and vehicle rates</p>
+            </Link>
+            <Link className="quick-link" to="/driver-locations">
+              <h4>Driver map</h4>
+              <p>See online captains on the map</p>
+            </Link>
+          </div>
         </div>
       </div>
     </div>

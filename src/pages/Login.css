@@ -32,6 +32,15 @@
   margin-bottom: 16px;
 }
 
+.brand-logo {
+  background: linear-gradient(145deg, #8B5CF6, #5B21B6);
+  color: #fff;
+  font-size: 28px;
+  font-weight: 800;
+  letter-spacing: 1px;
+  border-radius: 18px;
+}
+
 .login-header h1 {
   font-size: 28px;
   font-weight: 700;

@@ -19,7 +19,7 @@ function Login({ onLogin }) {
       localStorage.setItem('admin_user', username);
       onLogin();
     } catch (err) {
-      setError(err.response?.data?.detail || 'Login failed. Please try again.');
+      setError(err.response?.data?.detail || 'Login failed. Check your credentials and try again.');
     } finally {
       setLoading(false);
     }
@@ -29,14 +29,9 @@ function Login({ onLogin }) {
     <div className="login-container">
       <div className="login-card">
         <div className="login-header">
-          <div className="logo">
-            <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="#8B5CF6" strokeWidth="2">
-              <rect x="3" y="11" width="18" height="11" rx="2" ry="2"/>
-              <path d="M7 11V7a5 5 0 0 1 10 0v4"/>
-            </svg>
-          </div>
+          <div className="logo brand-logo">JK</div>
           <h1>JK Taxi Admin</h1>
-          <p>Sign in to your account</p>
+          <p>Sign in to the operations console</p>
         </div>
 
         <form onSubmit={handleSubmit} className="login-form">
@@ -52,6 +47,7 @@ function Login({ onLogin }) {
               placeholder="Enter your username"
               required
               autoFocus
+              autoComplete="username"
             />
           </div>
 
@@ -64,17 +60,20 @@ function Login({ onLogin }) {
               onChange={(e) => setPassword(e.target.value)}
               placeholder="Enter your password"
               required
+              autoComplete="current-password"
             />
           </div>
 
           <button type="submit" className="login-button" disabled={loading}>
-            {loading ? 'Signing in...' : 'Sign in'}
+            {loading ? 'Signing in…' : 'Sign in'}
           </button>
         </form>
 
-        <div className="login-footer">
-          <p>Test Credentials: admin / admin123</p>
-        </div>
+        {import.meta.env.DEV && (
+          <div className="login-footer">
+            <p>Dev only: admin / admin123</p>
+          </div>
+        )}
       </div>
     </div>
   );

@@ -1,9 +1,47 @@
 import apiClient from './client';
 
+const V2 = '/v2/admin/admin';
+
 export const adminAPI = {
-  // Dashboard stats
+  // Legacy totals (users/drivers counts)
   getStats: async () => {
     const response = await apiClient.get('/admin/dashboard/stats');
+    return response.data;
+  },
+
+  // Analytics (enhanced rides)
+  getAnalyticsOverview: async (days = 7) => {
+    const response = await apiClient.get(`${V2}/analytics/overview`, { params: { days } });
+    return response.data;
+  },
+
+  getHourlyDistribution: async (days = 7) => {
+    const response = await apiClient.get(`${V2}/analytics/hourly-distribution`, { params: { days } });
+    return response.data;
+  },
+
+  getTripTypeAnalytics: async (days = 7) => {
+    const response = await apiClient.get(`${V2}/analytics/trip-types`, { params: { days } });
+    return response.data;
+  },
+
+  getVehicleCategoryAnalytics: async (days = 7) => {
+    const response = await apiClient.get(`${V2}/analytics/vehicle-categories`, { params: { days } });
+    return response.data;
+  },
+
+  getRevenueForecast: async () => {
+    const response = await apiClient.get(`${V2}/analytics/revenue-forecast`);
+    return response.data;
+  },
+
+  getRecentRides: async ({ limit = 50, status } = {}) => {
+    const response = await apiClient.get(`${V2}/rides/recent`, {
+      params: {
+        limit,
+        ...(status ? { status_filter: status } : {}),
+      },
+    });
     return response.data;
   },
 
@@ -49,7 +87,7 @@ export const adminAPI = {
     return response.data;
   },
 
-  // Rides
+  // Rides (legacy list fallback)
   getRides: async () => {
     const response = await apiClient.get('/admin/rides');
     return response.data;
@@ -60,34 +98,40 @@ export const adminAPI = {
     return response.data;
   },
 
-  // Driver Earnings
   getDriverEarnings: async () => {
-    const response = await apiClient.get('/v2/admin/admin/drivers/earnings');
+    const response = await apiClient.get(`${V2}/drivers/earnings`);
     return response.data;
   },
 
-  // Active Rides
   getActiveRides: async () => {
     const response = await apiClient.get('/admin/rides/active');
     return response.data;
   },
 
-  // Online Drivers
   getOnlineDrivers: async () => {
     const response = await apiClient.get('/admin/drivers/online');
     return response.data;
   },
 
-  // Vehicle pricing (admin-enhanced — note doubled /admin path)
   getVehicleCategories: async (includeInactive = true) => {
-    const response = await apiClient.get('/v2/admin/admin/vehicle-categories', {
+    const response = await apiClient.get(`${V2}/vehicle-categories`, {
       params: { include_inactive: includeInactive },
     });
     return response.data;
   },
 
+  createVehicleCategory: async (data) => {
+    const response = await apiClient.post(`${V2}/vehicle-categories`, data);
+    return response.data;
+  },
+
   updateVehicleCategory: async (categoryId, data) => {
-    const response = await apiClient.put(`/v2/admin/admin/vehicle-categories/${categoryId}`, data);
+    const response = await apiClient.put(`${V2}/vehicle-categories/${categoryId}`, data);
+    return response.data;
+  },
+
+  deactivateVehicleCategory: async (categoryId) => {
+    const response = await apiClient.delete(`${V2}/vehicle-categories/${categoryId}`);
     return response.data;
   },
 };

@@ -1,27 +1,45 @@
-import { useState, useEffect } from 'react';
-import { MapContainer, TileLayer, Marker, Popup } from 'react-leaflet';
+import { useEffect, useMemo, useState } from 'react';
+import { MapContainer, TileLayer, Marker, Popup, useMap } from 'react-leaflet';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 import { adminAPI } from '../api/admin';
+import { PageHeader } from '../components/ui';
 
 const driverIcon = new L.DivIcon({
-  html: '<div style="background:#8B5CF6;width:20px;height:20px;border-radius:50%;border:2px solid white;box-shadow:0 2px 6px rgba(0,0,0,0.4);display:flex;align-items:center;justify-content:center"><div style="width:8px;height:8px;background:white;border-radius:50%"></div></div>',
+  html: '<div style="background:#8B5CF6;width:20px;height:20px;border-radius:50%;border:2px solid white;box-shadow:0 2px 6px rgba(0,0,0,.4)"></div>',
   iconSize: [20, 20],
   iconAnchor: [10, 10],
   className: '',
 });
 
+function FitBounds({ points, focus }) {
+  const map = useMap();
+  useEffect(() => {
+    if (focus) {
+      map.setView(focus, 15, { animate: true });
+      return;
+    }
+    if (!points.length) return;
+    map.fitBounds(L.latLngBounds(points).pad(0.25));
+  }, [map, points, focus]);
+  return null;
+}
+
 function DriverLocations() {
   const [drivers, setDrivers] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+  const [selectedId, setSelectedId] = useState(null);
+  const [lastUpdated, setLastUpdated] = useState(null);
+  const [vehicleFilter, setVehicleFilter] = useState('all');
 
   const fetchDrivers = async () => {
     try {
       const data = await adminAPI.getOnlineDrivers();
-      setDrivers(data);
+      setDrivers(Array.isArray(data) ? data : []);
       setError(null);
-    } catch (err) {
+      setLastUpdated(new Date());
+    } catch {
       setError('Failed to load driver locations');
     } finally {
       setLoading(false);
@@ -34,9 +52,23 @@ function DriverLocations() {
     return () => clearInterval(interval);
   }, []);
 
-  const mapCenter = drivers.length > 0
-    ? [drivers[0].lat, drivers[0].lng]
-    : [12.9716, 77.5946];
+  const vehicleTypes = useMemo(() => {
+    const set = new Set(drivers.map((d) => d.vehicle_type).filter(Boolean));
+    return ['all', ...Array.from(set)];
+  }, [drivers]);
+
+  const filtered = useMemo(() => {
+    if (vehicleFilter === 'all') return drivers;
+    return drivers.filter((d) => d.vehicle_type === vehicleFilter);
+  }, [drivers, vehicleFilter]);
+
+  const points = useMemo(
+    () => filtered.filter((d) => d.lat && d.lng).map((d) => [d.lat, d.lng]),
+    [filtered]
+  );
+
+  const selected = filtered.find((d) => d.id === selectedId);
+  const focus = selected?.lat ? [selected.lat, selected.lng] : null;
 
   const getTimeSince = (isoString) => {
     if (!isoString) return 'Unknown';
@@ -46,79 +78,90 @@ function DriverLocations() {
     return `${Math.floor(diff / 3600)}h ago`;
   };
 
-  if (loading) return <div className="page-loading">Loading driver locations...</div>;
+  if (loading) {
+    return (
+      <div className="page-container">
+        <div className="loading">Loading driver locations…</div>
+      </div>
+    );
+  }
 
   return (
-    <div style={{ padding: '24px' }}>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '24px' }}>
-        <h1 style={{ color: '#F1F5F9', margin: 0, fontSize: '24px' }}>Driver Locations</h1>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-          <span style={{ color: '#94A3B8', fontSize: '14px' }}>
-            {drivers.length} driver{drivers.length !== 1 ? 's' : ''} online
-          </span>
-          <button onClick={fetchDrivers} style={{ background: '#8B5CF6', color: 'white', border: 'none', padding: '8px 16px', borderRadius: '8px', cursor: 'pointer', fontSize: '13px' }}>
-            Refresh
-          </button>
+    <div className="page-container">
+      <PageHeader
+        title="Driver Map"
+        subtitle={lastUpdated ? `Updated ${lastUpdated.toLocaleTimeString('en-IN')}` : 'Online captains'}
+        actions={
+          <>
+            <div className="header-stat">
+              <span className="stat-number">{filtered.length}</span>
+              <span className="stat-text">Online</span>
+            </div>
+            <button type="button" className="ui-btn ui-btn-primary" onClick={fetchDrivers}>Refresh</button>
+          </>
+        }
+      />
+
+      {error && <div className="error-box">{error}</div>}
+
+      <div className="ui-toolbar">
+        <div className="ui-tabs">
+          {vehicleTypes.map((type) => (
+            <button
+              key={type}
+              type="button"
+              className={`ui-tab ${vehicleFilter === type ? 'active' : ''}`}
+              onClick={() => setVehicleFilter(type)}
+            >
+              {type === 'all' ? 'All vehicles' : type}
+            </button>
+          ))}
         </div>
       </div>
 
-      {error && <div style={{ color: '#EF4444', marginBottom: '16px' }}>{error}</div>}
-
-      {drivers.length === 0 ? (
-        <div style={{ background: '#1E293B', borderRadius: '12px', padding: '48px', textAlign: 'center', color: '#94A3B8' }}>
-          No drivers currently online
-        </div>
+      {filtered.length === 0 ? (
+        <div className="ui-empty">No drivers currently online</div>
       ) : (
-        <>
-          <div style={{ borderRadius: '12px', overflow: 'hidden', marginBottom: '24px', height: '500px' }}>
-            <MapContainer center={mapCenter} zoom={12} style={{ height: '100%', width: '100%' }}>
+        <div className="ops-layout">
+          <div className="ops-map" style={{ height: 500 }}>
+            <MapContainer center={points[0] || [12.9716, 77.5946]} zoom={12} style={{ height: '100%', width: '100%' }}>
               <TileLayer
-                attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
+                attribution='&copy; OpenStreetMap'
                 url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
               />
-              {drivers.map((driver) => (
+              <FitBounds points={points} focus={focus} />
+              {filtered.map((driver) => (
                 <Marker key={driver.id} position={[driver.lat, driver.lng]} icon={driverIcon}>
                   <Popup>
-                    <div style={{ minWidth: '150px' }}>
-                      <b>{driver.name}</b><br />
-                      <span style={{ color: '#666' }}>{driver.phone}</span><br />
-                      {driver.vehicle_number && <span>{driver.vehicle_number} ({driver.vehicle_type})</span>}
-                      <br />
-                      <small style={{ color: '#888' }}>Updated: {getTimeSince(driver.location_updated_at)}</small>
-                    </div>
+                    <b>{driver.name}</b><br />
+                    {driver.phone}<br />
+                    {driver.vehicle_number} ({driver.vehicle_type || 'N/A'})
                   </Popup>
                 </Marker>
               ))}
             </MapContainer>
           </div>
 
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: '12px' }}>
-            {drivers.map((driver) => (
-              <div key={driver.id} style={{ background: '#1E293B', borderRadius: '12px', padding: '16px' }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'start' }}>
-                  <div>
-                    <div style={{ color: '#F1F5F9', fontSize: '15px', fontWeight: 600 }}>{driver.name}</div>
-                    <div style={{ color: '#94A3B8', fontSize: '13px', marginTop: '2px' }}>{driver.phone}</div>
-                  </div>
-                  <div style={{ background: '#065F46', color: '#6EE7B7', padding: '2px 8px', borderRadius: '12px', fontSize: '11px', fontWeight: 600 }}>
-                    ONLINE
-                  </div>
+          <div className="ops-card-list" style={{ maxHeight: 500 }}>
+            {filtered.map((driver) => (
+              <div
+                key={driver.id}
+                className={`ops-card ${selectedId === driver.id ? 'selected' : ''}`}
+                onClick={() => setSelectedId(driver.id)}
+              >
+                <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                  <div className="ops-card-title">{driver.name}</div>
+                  <span className="ui-badge online">online</span>
                 </div>
-                {driver.vehicle_number && (
-                  <div style={{ color: '#64748B', fontSize: '13px', marginTop: '8px' }}>
-                    {driver.vehicle_number} &middot; {driver.vehicle_type || 'N/A'}
-                  </div>
-                )}
-                <div style={{ color: '#64748B', fontSize: '12px', marginTop: '8px' }}>
-                  Last updated: {getTimeSince(driver.location_updated_at)}
+                <div className="ops-card-sub">{driver.phone}</div>
+                <div className="ops-card-sub">
+                  {driver.vehicle_number || '—'} · {driver.vehicle_type || 'N/A'}
                 </div>
-                <div style={{ color: '#475569', fontSize: '11px', marginTop: '4px' }}>
-                  {driver.lat.toFixed(5)}, {driver.lng.toFixed(5)}
-                </div>
+                <div className="ops-card-sub">Updated {getTimeSince(driver.location_updated_at)}</div>
               </div>
             ))}
           </div>
-        </>
+        </div>
       )}
     </div>
   );

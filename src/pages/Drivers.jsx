@@ -1,9 +1,8 @@
-import { useState, useEffect } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { adminAPI } from '../api/admin';
 import { API_BASE_URL } from '../config';
-import './Users.css';
+import { Drawer, formatDate, Modal, PageHeader, StatusBadge } from '../components/ui';
 
-/** Build absolute URL for /uploads/... paths stored in DB */
 function mediaUrl(path) {
   if (!path) return '';
   if (/^https?:\/\//i.test(path) || path.startsWith('data:')) return path;
@@ -11,259 +10,144 @@ function mediaUrl(path) {
   return path.startsWith('/') ? `${origin}${path}` : `${origin}/${path}`;
 }
 
+function driverBucket(d) {
+  if (!d.is_active && !d.is_verified) return 'pending';
+  if (!d.is_active && d.is_verified) return 'blocked';
+  if (d.is_active) return 'active';
+  return 'pending';
+}
+
 function Drivers() {
   const [drivers, setDrivers] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
-  const [actionLoading, setActionLoading] = useState(null);
-  const [selectedDriver, setSelectedDriver] = useState(null);
-  const [filter, setFilter] = useState('all'); // all, pending, active, blocked
-
-  useEffect(() => {
-    loadDrivers();
-  }, []);
+  const [search, setSearch] = useState('');
+  const [filter, setFilter] = useState('all');
+  const [selected, setSelected] = useState(null);
+  const [confirmAction, setConfirmAction] = useState(null);
+  const [actionLoading, setActionLoading] = useState(false);
 
   const loadDrivers = async () => {
     try {
       setLoading(true);
       const data = await adminAPI.getDrivers();
-      setDrivers(data);
+      setDrivers(Array.isArray(data) ? data : []);
       setError('');
-    } catch (err) {
+    } catch {
       setError('Failed to load drivers');
     } finally {
       setLoading(false);
     }
   };
 
-  const handleApprove = async (driverId) => {
-    try {
-      setActionLoading(driverId);
-      await adminAPI.unblockDriver(driverId);
-      await loadDrivers();
-      setSelectedDriver(null);
-    } catch (err) {
-      alert('Failed to approve driver');
-    } finally {
-      setActionLoading(null);
-    }
-  };
+  useEffect(() => {
+    loadDrivers();
+  }, []);
 
-  const handleBlock = async (driverId) => {
-    if (!confirm('Are you sure you want to block/deactivate this driver?')) return;
-    try {
-      setActionLoading(driverId);
-      await adminAPI.blockDriver(driverId);
-      await loadDrivers();
-      setSelectedDriver(null);
-    } catch (err) {
-      alert('Failed to block driver');
-    } finally {
-      setActionLoading(null);
-    }
-  };
+  const counts = useMemo(() => ({
+    all: drivers.length,
+    pending: drivers.filter((d) => driverBucket(d) === 'pending').length,
+    active: drivers.filter((d) => driverBucket(d) === 'active').length,
+    blocked: drivers.filter((d) => driverBucket(d) === 'blocked').length,
+    online: drivers.filter((d) => d.is_online && d.is_active).length,
+  }), [drivers]);
 
-  const handleUnblock = async (driverId) => {
-    try {
-      setActionLoading(driverId);
-      await adminAPI.unblockDriver(driverId);
-      await loadDrivers();
-    } catch (err) {
-      alert('Failed to unblock driver');
-    } finally {
-      setActionLoading(null);
-    }
-  };
-
-  const formatDate = (dateString) => {
-    return new Date(dateString).toLocaleDateString('en-IN', {
-      year: 'numeric',
-      month: 'short',
-      day: 'numeric',
-      hour: '2-digit',
-      minute: '2-digit'
+  const filtered = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    return drivers.filter((d) => {
+      if (filter !== 'all' && driverBucket(d) !== filter) return false;
+      if (!q) return true;
+      return [d.name, d.phone, d.vehicle_number, d.email]
+        .some((v) => String(v || '').toLowerCase().includes(q));
     });
+  }, [drivers, filter, search]);
+
+  const openDriver = async (driver) => {
+    setSelected(driver);
+    try {
+      const detail = await adminAPI.getDriver(driver.id);
+      setSelected(detail);
+    } catch {
+      // keep list data
+    }
   };
 
-  const filteredDrivers = drivers.filter(d => {
-    if (filter === 'pending') return !d.is_active;
-    if (filter === 'active') return d.is_active;
-    if (filter === 'blocked') return !d.is_active && d.is_verified;
-    return true;
-  });
-
-  const pendingCount = drivers.filter(d => !d.is_active).length;
-  const onlineDrivers = drivers.filter(d => d.is_online && d.is_active).length;
+  const runConfirm = async () => {
+    if (!confirmAction) return;
+    try {
+      setActionLoading(true);
+      if (confirmAction.type === 'block') await adminAPI.blockDriver(confirmAction.id);
+      else await adminAPI.unblockDriver(confirmAction.id);
+      setConfirmAction(null);
+      setSelected(null);
+      await loadDrivers();
+    } catch {
+      setError('Driver action failed');
+    } finally {
+      setActionLoading(false);
+    }
+  };
 
   if (loading) {
     return (
       <div className="page-container">
-        <div className="loading">Loading drivers...</div>
-      </div>
-    );
-  }
-
-  if (error) {
-    return (
-      <div className="page-container">
-        <div className="error-box">{error}</div>
+        <div className="loading">Loading drivers…</div>
       </div>
     );
   }
 
   return (
     <div className="page-container">
-      <div className="page-header">
-        <div>
-          <h1>Drivers</h1>
-          <p>Manage driver accounts and approvals</p>
+      <PageHeader
+        title="Drivers"
+        subtitle="KYC review, approvals, and account controls"
+        actions={
+          <>
+            <div className="header-stat">
+              <span className="stat-number">{counts.all}</span>
+              <span className="stat-text">Total</span>
+            </div>
+            <div className="header-stat">
+              <span className="stat-number" style={{ color: '#F59E0B' }}>{counts.pending}</span>
+              <span className="stat-text">Pending KYC</span>
+            </div>
+            <div className="header-stat">
+              <span className="stat-number" style={{ color: '#22C55E' }}>{counts.online}</span>
+              <span className="stat-text">Online</span>
+            </div>
+          </>
+        }
+      />
+
+      {error && <div className="error-box">{error}</div>}
+
+      <div className="ui-toolbar">
+        <input
+          className="ui-search"
+          placeholder="Search name, phone, vehicle…"
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+        />
+        <div className="ui-tabs">
+          {[
+            ['all', `All (${counts.all})`],
+            ['pending', `Pending (${counts.pending})`],
+            ['active', `Active (${counts.active})`],
+            ['blocked', `Blocked (${counts.blocked})`],
+          ].map(([key, label]) => (
+            <button
+              key={key}
+              type="button"
+              className={`ui-tab ${filter === key ? 'active' : ''}`}
+              onClick={() => setFilter(key)}
+            >
+              {label}
+            </button>
+          ))}
         </div>
-        <div className="header-stats">
-          <div className="header-stat">
-            <span className="stat-number">{drivers.length}</span>
-            <span className="stat-text">Total</span>
-          </div>
-          <div className="header-stat">
-            <span className="stat-number" style={{color: '#F59E0B'}}>{pendingCount}</span>
-            <span className="stat-text">Pending</span>
-          </div>
-          <div className="header-stat">
-            <span className="stat-number" style={{color: '#22C55E'}}>{onlineDrivers}</span>
-            <span className="stat-text">Online</span>
-          </div>
-        </div>
+        <button type="button" className="ui-btn" onClick={loadDrivers}>Refresh</button>
       </div>
 
-      {/* Filter Tabs */}
-      <div style={{display: 'flex', gap: '8px', marginBottom: '20px'}}>
-        {['all', 'pending', 'active'].map(f => (
-          <button
-            key={f}
-            onClick={() => setFilter(f)}
-            style={{
-              padding: '8px 16px',
-              borderRadius: '8px',
-              border: filter === f ? '2px solid #6366F1' : '1px solid #E0E0E0',
-              backgroundColor: filter === f ? '#EEF2FF' : '#fff',
-              color: filter === f ? '#4F46E5' : '#666',
-              fontWeight: filter === f ? 600 : 400,
-              cursor: 'pointer',
-              textTransform: 'capitalize'
-            }}
-          >
-            {f} {f === 'pending' && pendingCount > 0 ? `(${pendingCount})` : ''}
-          </button>
-        ))}
-      </div>
-
-      {/* Driver Detail Modal */}
-      {selectedDriver && (
-        <div style={{
-          position: 'fixed', top: 0, left: 0, right: 0, bottom: 0,
-          backgroundColor: 'rgba(0,0,0,0.5)', display: 'flex',
-          alignItems: 'center', justifyContent: 'center', zIndex: 1000
-        }}>
-          <div style={{
-            backgroundColor: '#fff', borderRadius: '16px', padding: '24px',
-            maxWidth: '600px', width: '90%', maxHeight: '80vh', overflow: 'auto'
-          }}>
-            <div style={{display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px'}}>
-              <h2 style={{margin: 0}}>Driver Details</h2>
-              <button onClick={() => setSelectedDriver(null)} style={{
-                background: 'none', border: 'none', fontSize: '24px', cursor: 'pointer', color: '#666'
-              }}>✕</button>
-            </div>
-
-            <div style={{display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px', marginBottom: '20px'}}>
-              <div><strong>Name:</strong> {selectedDriver.name}</div>
-              <div><strong>Phone:</strong> {selectedDriver.phone}</div>
-              <div><strong>Email:</strong> {selectedDriver.email || 'N/A'}</div>
-              <div><strong>Vehicle:</strong> {selectedDriver.vehicle_number || 'N/A'}</div>
-              <div><strong>Vehicle Type:</strong> {selectedDriver.vehicle_type || 'N/A'}</div>
-              <div><strong>Joined:</strong> {formatDate(selectedDriver.created_at)}</div>
-              <div>
-                <strong>Status: </strong>
-                <span style={{
-                  padding: '2px 8px', borderRadius: '4px',
-                  backgroundColor: selectedDriver.is_active ? '#D1FAE5' : '#FEF3C7',
-                  color: selectedDriver.is_active ? '#065F46' : '#92400E',
-                  fontWeight: 600, fontSize: '12px'
-                }}>
-                  {selectedDriver.is_active ? 'Active' : 'Pending Approval'}
-                </span>
-              </div>
-            </div>
-
-            {/* Documents Section */}
-            <h3 style={{marginBottom: '12px', color: '#333'}}>Documents</h3>
-            <div style={{display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px', marginBottom: '24px'}}>
-              <div>
-                <p style={{fontWeight: 600, marginBottom: '8px', color: '#555'}}>Driving License</p>
-                {selectedDriver.license_document ? (
-                  <img
-                    src={mediaUrl(selectedDriver.license_document)}
-                    alt="License"
-                    style={{width: '100%', height: '160px', objectFit: 'cover', borderRadius: '8px', border: '1px solid #E0E0E0'}}
-                  />
-                ) : (
-                  <div style={{
-                    width: '100%', height: '160px', backgroundColor: '#F5F5F5',
-                    borderRadius: '8px', display: 'flex', alignItems: 'center',
-                    justifyContent: 'center', color: '#999', border: '1px dashed #CCC'
-                  }}>Not uploaded</div>
-                )}
-              </div>
-              <div>
-                <p style={{fontWeight: 600, marginBottom: '8px', color: '#555'}}>Aadhar Card</p>
-                {selectedDriver.aadhar_document ? (
-                  <img
-                    src={mediaUrl(selectedDriver.aadhar_document)}
-                    alt="Aadhar"
-                    style={{width: '100%', height: '160px', objectFit: 'cover', borderRadius: '8px', border: '1px solid #E0E0E0'}}
-                  />
-                ) : (
-                  <div style={{
-                    width: '100%', height: '160px', backgroundColor: '#F5F5F5',
-                    borderRadius: '8px', display: 'flex', alignItems: 'center',
-                    justifyContent: 'center', color: '#999', border: '1px dashed #CCC'
-                  }}>Not uploaded</div>
-                )}
-              </div>
-            </div>
-
-            {/* Action Buttons */}
-            <div style={{display: 'flex', gap: '12px'}}>
-              {!selectedDriver.is_active ? (
-                <button
-                  onClick={() => handleApprove(selectedDriver.id)}
-                  disabled={actionLoading === selectedDriver.id}
-                  style={{
-                    flex: 1, padding: '12px', borderRadius: '8px', border: 'none',
-                    backgroundColor: '#10B981', color: '#fff', fontWeight: 600,
-                    fontSize: '14px', cursor: 'pointer'
-                  }}
-                >
-                  {actionLoading === selectedDriver.id ? 'Approving...' : '✓ Approve & Activate'}
-                </button>
-              ) : (
-                <button
-                  onClick={() => handleBlock(selectedDriver.id)}
-                  disabled={actionLoading === selectedDriver.id}
-                  style={{
-                    flex: 1, padding: '12px', borderRadius: '8px', border: 'none',
-                    backgroundColor: '#EF4444', color: '#fff', fontWeight: 600,
-                    fontSize: '14px', cursor: 'pointer'
-                  }}
-                >
-                  {actionLoading === selectedDriver.id ? 'Blocking...' : '✕ Block / Deactivate'}
-                </button>
-              )}
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Drivers Table */}
       <div className="table-container">
         <table className="data-table">
           <thead>
@@ -278,80 +162,158 @@ function Drivers() {
             </tr>
           </thead>
           <tbody>
-            {filteredDrivers.length === 0 ? (
+            {filtered.length === 0 ? (
               <tr>
-                <td colSpan="7" className="empty-state">No drivers found</td>
+                <td colSpan="7" className="empty-state">No drivers match your filters</td>
               </tr>
             ) : (
-              filteredDrivers.map((driver) => (
-                <tr key={driver.id} onClick={() => setSelectedDriver(driver)} style={{cursor: 'pointer'}}>
-                  <td>
-                    <div className="user-cell">
-                      <div className="user-avatar-small">{driver.name.charAt(0).toUpperCase()}</div>
-                      <span>{driver.name}</span>
-                    </div>
-                  </td>
-                  <td>{driver.phone}</td>
-                  <td>
-                    {driver.vehicle_number ? (
-                      <div>
-                        <div style={{fontWeight: 500}}>{driver.vehicle_number}</div>
-                        <div style={{fontSize: '12px', color: '#94A3B8'}}>{driver.vehicle_type || 'N/A'}</div>
+              filtered.map((driver) => {
+                const bucket = driverBucket(driver);
+                return (
+                  <tr key={driver.id} className="clickable" onClick={() => openDriver(driver)}>
+                    <td>
+                      <div className="user-cell">
+                        <div className="user-avatar-small">{(driver.name || '?').charAt(0).toUpperCase()}</div>
+                        <span>{driver.name}</span>
                       </div>
-                    ) : '-'}
-                  </td>
-                  <td>
-                    <div style={{display: 'flex', gap: '4px'}}>
-                      <span style={{
-                        padding: '2px 6px', borderRadius: '4px', fontSize: '11px', fontWeight: 600,
-                        backgroundColor: driver.license_document ? '#D1FAE5' : '#FEE2E2',
-                        color: driver.license_document ? '#065F46' : '#991B1B'
-                      }}>
-                        {driver.license_document ? 'License ✓' : 'License ✕'}
-                      </span>
-                      <span style={{
-                        padding: '2px 6px', borderRadius: '4px', fontSize: '11px', fontWeight: 600,
-                        backgroundColor: driver.aadhar_document ? '#D1FAE5' : '#FEE2E2',
-                        color: driver.aadhar_document ? '#065F46' : '#991B1B'
-                      }}>
-                        {driver.aadhar_document ? 'Aadhar ✓' : 'Aadhar ✕'}
-                      </span>
-                    </div>
-                  </td>
-                  <td>
-                    <span className={`status-badge ${driver.is_active ? 'active' : 'pending'}`}>
-                      {driver.is_active ? 'Active' : 'Pending'}
-                    </span>
-                    {driver.is_active && driver.is_online && (
-                      <span className="status-badge online" style={{marginLeft: '4px'}}>Online</span>
-                    )}
-                  </td>
-                  <td>{formatDate(driver.created_at)}</td>
-                  <td>
-                    {driver.is_active ? (
-                      <button
-                        onClick={(e) => { e.stopPropagation(); handleBlock(driver.id); }}
-                        disabled={actionLoading === driver.id}
-                        className="action-button danger"
-                      >
-                        {actionLoading === driver.id ? '...' : 'Block'}
-                      </button>
-                    ) : (
-                      <button
-                        onClick={(e) => { e.stopPropagation(); handleApprove(driver.id); }}
-                        disabled={actionLoading === driver.id}
-                        className="action-button success"
-                      >
-                        {actionLoading === driver.id ? '...' : 'Approve'}
-                      </button>
-                    )}
-                  </td>
-                </tr>
-              ))
+                    </td>
+                    <td>{driver.phone}</td>
+                    <td>
+                      {driver.vehicle_number ? (
+                        <div>
+                          <div style={{ fontWeight: 500 }}>{driver.vehicle_number}</div>
+                          <div style={{ fontSize: 12, color: 'var(--text-secondary)' }}>
+                            {driver.vehicle_type || 'N/A'}
+                          </div>
+                        </div>
+                      ) : '—'}
+                    </td>
+                    <td>
+                      <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
+                        <span className={`ui-badge ${driver.license_document ? 'active' : 'blocked'}`}>
+                          License
+                        </span>
+                        <span className={`ui-badge ${driver.aadhar_document ? 'active' : 'blocked'}`}>
+                          Aadhar
+                        </span>
+                      </div>
+                    </td>
+                    <td>
+                      <StatusBadge status={bucket === 'pending' ? 'pending' : bucket === 'blocked' ? 'blocked' : 'active'} />
+                      {driver.is_active && driver.is_online ? (
+                        <span className="ui-badge online" style={{ marginLeft: 4 }}>online</span>
+                      ) : null}
+                    </td>
+                    <td>{formatDate(driver.created_at)}</td>
+                    <td onClick={(e) => e.stopPropagation()}>
+                      {driver.is_active ? (
+                        <button
+                          type="button"
+                          className="action-button danger"
+                          onClick={() => setConfirmAction({ type: 'block', id: driver.id, name: driver.name })}
+                        >
+                          Block
+                        </button>
+                      ) : (
+                        <button
+                          type="button"
+                          className="action-button success"
+                          onClick={() => setConfirmAction({ type: 'approve', id: driver.id, name: driver.name })}
+                        >
+                          Approve
+                        </button>
+                      )}
+                    </td>
+                  </tr>
+                );
+              })
             )}
           </tbody>
         </table>
       </div>
+
+      <Drawer
+        open={!!selected}
+        title={selected?.name || 'Driver'}
+        onClose={() => setSelected(null)}
+        actions={
+          selected ? (
+            selected.is_active ? (
+              <button
+                type="button"
+                className="ui-btn ui-btn-danger"
+                onClick={() => setConfirmAction({ type: 'block', id: selected.id, name: selected.name })}
+              >
+                Block driver
+              </button>
+            ) : (
+              <button
+                type="button"
+                className="ui-btn ui-btn-success"
+                onClick={() => setConfirmAction({ type: 'approve', id: selected.id, name: selected.name })}
+              >
+                Approve & activate
+              </button>
+            )
+          ) : null
+        }
+      >
+        {selected && (
+          <>
+            <div className="ui-meta" style={{ marginBottom: 16 }}>
+              <div className="ui-meta-row"><span>Phone</span><span>{selected.phone}</span></div>
+              <div className="ui-meta-row"><span>Email</span><span>{selected.email || '—'}</span></div>
+              <div className="ui-meta-row"><span>Vehicle</span><span>{selected.vehicle_number || '—'} · {selected.vehicle_type || '—'}</span></div>
+              <div className="ui-meta-row"><span>Verified</span><span>{selected.is_verified ? 'Yes' : 'No'}</span></div>
+              <div className="ui-meta-row"><span>Joined</span><span>{formatDate(selected.created_at)}</span></div>
+            </div>
+            <h3 style={{ fontSize: 14, marginBottom: 8 }}>Documents</h3>
+            <div className="form-grid">
+              <div>
+                <div style={{ fontSize: 12, color: 'var(--text-secondary)' }}>Driving license</div>
+                {selected.license_document ? (
+                  <img className="doc-preview" src={mediaUrl(selected.license_document)} alt="License" />
+                ) : (
+                  <div className="ui-empty" style={{ padding: 24 }}>Not uploaded</div>
+                )}
+              </div>
+              <div>
+                <div style={{ fontSize: 12, color: 'var(--text-secondary)' }}>Aadhar</div>
+                {selected.aadhar_document ? (
+                  <img className="doc-preview" src={mediaUrl(selected.aadhar_document)} alt="Aadhar" />
+                ) : (
+                  <div className="ui-empty" style={{ padding: 24 }}>Not uploaded</div>
+                )}
+              </div>
+            </div>
+          </>
+        )}
+      </Drawer>
+
+      <Modal
+        open={!!confirmAction}
+        title={confirmAction?.type === 'block' ? 'Block driver?' : 'Approve driver?'}
+        onClose={() => setConfirmAction(null)}
+        actions={
+          <>
+            <button type="button" className="ui-btn" onClick={() => setConfirmAction(null)}>Cancel</button>
+            <button
+              type="button"
+              className={`ui-btn ${confirmAction?.type === 'block' ? 'ui-btn-danger' : 'ui-btn-success'}`}
+              disabled={actionLoading}
+              onClick={runConfirm}
+            >
+              {actionLoading ? 'Working…' : 'Confirm'}
+            </button>
+          </>
+        }
+      >
+        <p style={{ color: 'var(--text-secondary)', lineHeight: 1.5 }}>
+          {confirmAction?.type === 'block'
+            ? `Deactivate ${confirmAction?.name || 'this driver'}?`
+            : `Approve and activate ${confirmAction?.name || 'this driver'}?`}
+        </p>
+      </Modal>
     </div>
   );
 }
