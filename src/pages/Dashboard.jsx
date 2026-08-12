@@ -52,15 +52,38 @@ function Dashboard() {
   const load = useCallback(async () => {
     try {
       setError('');
-      const [stats, ov, hour, trips, cats, forecast, recentRes] = await Promise.all([
-        adminAPI.getStats().catch(() => null),
+      const results = await Promise.allSettled([
+        adminAPI.getStats(),
         adminAPI.getAnalyticsOverview(days),
         adminAPI.getHourlyDistribution(days),
         adminAPI.getTripTypeAnalytics(days),
         adminAPI.getVehicleCategoryAnalytics(days),
-        adminAPI.getRevenueForecast().catch(() => ({ daily_data: [] })),
+        adminAPI.getRevenueForecast(),
         adminAPI.getRecentRides({ limit: 8 }),
       ]);
+
+      const value = (i, fallback = null) =>
+        results[i].status === 'fulfilled' ? results[i].value : fallback;
+
+      const stats = value(0);
+      const ov = value(1);
+      const hour = value(2, { hourly_distribution: [] });
+      const trips = value(3, { trip_types: [] });
+      const cats = value(4, { vehicle_categories: [] });
+      const forecast = value(5, { daily_data: [] });
+      const recentRes = value(6, { rides: [] });
+
+      const failed = results
+        .map((r, i) => (r.status === 'rejected' ? i : null))
+        .filter((i) => i != null);
+      // Overview is required for the main cards; others can fail soft
+      if (results[1].status === 'rejected') {
+        const err = results[1].reason;
+        setError(err?.response?.data?.detail || err?.message || 'Failed to load dashboard analytics');
+      } else if (failed.length > 0) {
+        setError('');
+      }
+
       setLegacy(stats);
       setOverview(ov);
       const hourlyRows = Array.from({ length: 24 }, (_, h) => {
@@ -88,7 +111,7 @@ function Dashboard() {
       );
       setDaily(
         (forecast?.daily_data || []).map((d) => ({
-          date: String(d.date).slice(5),
+          date: String(d.date || '').slice(5),
           revenue: d.revenue,
           rides: d.ride_count,
         }))
