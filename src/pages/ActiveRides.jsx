@@ -4,6 +4,7 @@ import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 import { adminAPI } from '../api/admin';
 import { formatDate, formatINR, PageHeader, StatusBadge } from '../components/ui';
+import { getVehicleMapIcon } from '../utils/vehicleMapIcons';
 
 const pickupIcon = new L.DivIcon({
   html: '<div style="background:#22C55E;width:14px;height:14px;border-radius:50%;border:2px solid white;box-shadow:0 2px 4px rgba(0,0,0,.35)"></div>',
@@ -16,13 +17,6 @@ const dropoffIcon = new L.DivIcon({
   html: '<div style="background:#EF4444;width:14px;height:14px;border-radius:50%;border:2px solid white;box-shadow:0 2px 4px rgba(0,0,0,.35)"></div>',
   iconSize: [14, 14],
   iconAnchor: [7, 7],
-  className: '',
-});
-
-const driverIcon = new L.DivIcon({
-  html: '<div style="background:#8B5CF6;width:18px;height:18px;border-radius:50%;border:2px solid white;box-shadow:0 2px 6px rgba(0,0,0,.4)"></div>',
-  iconSize: [18, 18],
-  iconAnchor: [9, 9],
   className: '',
 });
 
@@ -133,8 +127,21 @@ function ActiveRides() {
                     </Marker>
                   )}
                   {ride.driver_lat && (
-                    <Marker position={[ride.driver_lat, ride.driver_lng]} icon={driverIcon}>
-                      <Popup>{ride.driver_name}<br />{ride.driver_phone}</Popup>
+                    <Marker
+                      position={[ride.driver_lat, ride.driver_lng]}
+                      icon={getVehicleMapIcon(ride.driver_vehicle_type || ride.vehicle_type)}
+                    >
+                      <Popup>
+                        {ride.driver_name}
+                        <br />
+                        {ride.driver_phone}
+                        {ride.driver_vehicle_type && (
+                          <>
+                            <br />
+                            {ride.driver_vehicle_type}
+                          </>
+                        )}
+                      </Popup>
                     </Marker>
                   )}
                   {ride.pickup_lat && ride.dropoff_lat && (

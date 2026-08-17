@@ -49,6 +49,32 @@
   margin-bottom: 16px;
 }
 
+.map-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px 14px;
+  margin-left: auto;
+}
+
+.map-legend-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--text-secondary);
+  text-transform: capitalize;
+}
+
+.map-legend-icon {
+  display: inline-flex;
+  line-height: 0;
+}
+
+.vehicle-map-marker {
+  background: transparent !important;
+  border: none !important;
+}
+
 .ui-search {
   flex: 1;
   min-width: 200px;

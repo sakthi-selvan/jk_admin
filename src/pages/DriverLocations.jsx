@@ -4,13 +4,7 @@ import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 import { adminAPI } from '../api/admin';
 import { PageHeader } from '../components/ui';
-
-const driverIcon = new L.DivIcon({
-  html: '<div style="background:#8B5CF6;width:20px;height:20px;border-radius:50%;border:2px solid white;box-shadow:0 2px 6px rgba(0,0,0,.4)"></div>',
-  iconSize: [20, 20],
-  iconAnchor: [10, 10],
-  className: '',
-});
+import { FLEET_LEGEND, getVehicleMapIcon, getVehicleMarkerHtml } from '../utils/vehicleMapIcons';
 
 function FitBounds({ points, focus }) {
   const map = useMap();
@@ -117,6 +111,19 @@ function DriverLocations() {
             </button>
           ))}
         </div>
+        <div className="map-legend">
+          {FLEET_LEGEND.map(({ category, label }) => (
+            <span key={category} className="map-legend-item" title={label}>
+              <span
+                className="map-legend-icon"
+                dangerouslySetInnerHTML={{
+                  __html: getVehicleMarkerHtml(category, 22),
+                }}
+              />
+              {label}
+            </span>
+          ))}
+        </div>
       </div>
 
       {filtered.length === 0 ? (
@@ -131,7 +138,11 @@ function DriverLocations() {
               />
               <FitBounds points={points} focus={focus} />
               {filtered.map((driver) => (
-                <Marker key={driver.id} position={[driver.lat, driver.lng]} icon={driverIcon}>
+                <Marker
+                  key={driver.id}
+                  position={[driver.lat, driver.lng]}
+                  icon={getVehicleMapIcon(driver.vehicle_type)}
+                >
                   <Popup>
                     <b>{driver.name}</b><br />
                     {driver.phone}<br />
